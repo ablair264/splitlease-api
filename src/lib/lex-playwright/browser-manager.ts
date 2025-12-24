@@ -88,42 +88,49 @@ export class LexBrowserManager {
 
     try {
       console.log("[LexBrowser] Navigating to login page...");
-      await this.page.goto(LEX_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await this.page.goto(LEX_LOGIN_URL, { waitUntil: "load", timeout: 60000 });
+
+      // Wait a moment for any overlays to appear
+      await this.page.waitForTimeout(2000);
+
+      console.log("[LexBrowser] Current URL:", this.page.url());
 
       // Handle cookie consent if present - must be done before login form is accessible
       console.log("[LexBrowser] Checking for cookie consent banner...");
-      try {
-        // Try multiple selectors for cookie consent
-        const consentSelectors = [
-          '#accept',  // Lex's tealium cookie consent
-          'span#accept',
-          '.tealium_confirm',
-          'button:has-text("Accept all")',
-          'button:has-text("Accept All")',
-          'a:has-text("Accept all")',
-          '#onetrust-accept-btn-handler',
-        ];
 
-        for (const selector of consentSelectors) {
-          try {
-            const button = this.page.locator(selector).first();
-            if (await button.isVisible({ timeout: 3000 })) {
-              await button.click();
-              console.log(`[LexBrowser] Clicked cookie consent: ${selector}`);
-              await this.page.waitForTimeout(1000);
-              break;
-            }
-          } catch {
-            // Try next selector
-          }
-        }
+      // Wait specifically for the Lex cookie consent to appear
+      try {
+        const cookieAccept = this.page.locator('#accept');
+        await cookieAccept.waitFor({ state: 'visible', timeout: 5000 });
+        console.log("[LexBrowser] Cookie consent found, clicking...");
+        await cookieAccept.click();
+        console.log("[LexBrowser] Cookie consent clicked");
+        await this.page.waitForTimeout(1000);
       } catch {
-        console.log("[LexBrowser] No cookie consent found or already accepted");
+        console.log("[LexBrowser] No cookie consent banner found, continuing...");
       }
 
       // Wait for login form to be ready
       console.log("[LexBrowser] Waiting for login form...");
-      await this.page.waitForSelector("#txtUserName", { timeout: 30000 });
+
+      // First check if the element exists at all
+      const loginFormExists = await this.page.locator("#txtUserName").count();
+      console.log(`[LexBrowser] Login form elements found: ${loginFormExists}`);
+
+      if (loginFormExists === 0) {
+        // Take screenshot for debugging
+        console.log("[LexBrowser] Login form not found, taking screenshot...");
+        const screenshot = await this.page.screenshot({ fullPage: true });
+        console.log("[LexBrowser] Screenshot taken, size:", screenshot.length);
+
+        // Log page content for debugging
+        const pageTitle = await this.page.title();
+        console.log("[LexBrowser] Page title:", pageTitle);
+
+        throw new Error("Login form not found on page");
+      }
+
+      await this.page.waitForSelector("#txtUserName", { state: 'visible', timeout: 30000 });
 
       // Fill login credentials
       console.log("[LexBrowser] Entering credentials...");
