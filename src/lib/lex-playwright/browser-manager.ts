@@ -130,8 +130,9 @@ export class LexBrowserManager {
       await this.page.locator("#txtUserName").fill(username);
       await this.page.locator("#txtPassword").fill(password);
 
-      // Click login
-      await this.page.getByRole("link", { name: "Logon" }).click();
+      // Click login button
+      console.log("[LexBrowser] Clicking login button...");
+      await this.page.locator("#btnLogon").click();
 
       // Wait for navigation after login
       await this.page.waitForLoadState("networkidle");
