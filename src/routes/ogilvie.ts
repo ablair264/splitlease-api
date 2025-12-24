@@ -4,7 +4,6 @@ import { requireAuth } from "../middleware/auth.js";
 import {
   loginToOgilvie,
   validateOgilvieSession,
-  getOgilvieManufacturers,
   runOgilvieExport,
   runOgilvieMultiExport,
   getOgilvieExports,
@@ -107,39 +106,6 @@ router.get(
       valid: true,
       createdAt: session.createdAt,
     });
-  })
-);
-
-// =============================================================================
-// MANUFACTURERS
-// =============================================================================
-
-/**
- * GET /api/ogilvie/manufacturers
- * Get list of manufacturers available for export
- */
-router.get(
-  "/manufacturers",
-  asyncHandler(async (req: Request, res: Response) => {
-    const userId = req.user?.id;
-    if (!userId) {
-      throw new ApiError("User not authenticated", 401);
-    }
-
-    const session = await getCachedOgilvieSession(userId);
-
-    if (!session) {
-      throw new ApiError("No valid session. Please login first.", 401);
-    }
-
-    const isValid = await validateOgilvieSession(session.sessionCookie);
-    if (!isValid) {
-      throw new ApiError("Session expired. Please login again.", 401);
-    }
-
-    const manufacturers = await getOgilvieManufacturers(session.sessionCookie);
-
-    res.json({ manufacturers });
   })
 );
 

@@ -753,22 +753,26 @@ export async function getOgilvieManufacturers(
       }
     });
 
-    // If not found in select, try the API
+    // If not found in select, try the API (may fail with 404 on newer Ogilvie versions)
     if (manufacturers.length === 0) {
-      const apiResponse = await client.get("/BrokerQuotes/api/DerivativeSearch/GetManufacturers", {
-        headers: {
-          "X-Requested-With": "XMLHttpRequest",
-        },
-      });
+      try {
+        const apiResponse = await client.get("/BrokerQuotes/api/DerivativeSearch/GetManufacturers", {
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+          },
+        });
 
-      if (Array.isArray(apiResponse.data)) {
-        for (const item of apiResponse.data) {
-          const id = item.ID || item.Id || item.id || item.ManufacturerID;
-          const name = item.Name || item.name || item.ManufacturerName;
-          if (id && name) {
-            manufacturers.push({ id: parseInt(id, 10), name });
+        if (Array.isArray(apiResponse.data)) {
+          for (const item of apiResponse.data) {
+            const id = item.ID || item.Id || item.id || item.ManufacturerID;
+            const name = item.Name || item.name || item.ManufacturerName;
+            if (id && name) {
+              manufacturers.push({ id: parseInt(id, 10), name });
+            }
           }
         }
+      } catch (apiError) {
+        console.warn("GetManufacturers API not available, continuing without manufacturer list");
       }
     }
 
