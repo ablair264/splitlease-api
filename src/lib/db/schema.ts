@@ -1464,3 +1464,106 @@ export type UserTableView = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+// ============================================
+// LEX PLAYWRIGHT AUTOMATION
+// ============================================
+
+export const lexPlaywrightBatches = pgTable("lex_playwright_batches", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  batchId: text("batch_id").notNull().unique(),
+  status: text("status").notNull().default("pending"), // pending, running, completed, failed
+
+  // Configuration
+  vehicleIds: jsonb("vehicle_ids").$type<string[]>().notNull(),
+  terms: jsonb("terms").$type<number[]>().notNull(),
+  mileages: jsonb("mileages").$type<number[]>().notNull(),
+  contractTypes: jsonb("contract_types").$type<string[]>().notNull(),
+  paymentPlans: jsonb("payment_plans").$type<string[]>().notNull(),
+  useDefaultOtr: boolean("use_default_otr").default(true),
+  customOtrp: integer("custom_otrp"), // In pence, if use_default_otr=false
+
+  // Progress
+  totalCombinations: integer("total_combinations").default(0),
+  processedCount: integer("processed_count").default(0),
+  successCount: integer("success_count").default(0),
+  errorCount: integer("error_count").default(0),
+
+  // Results
+  errorMessage: text("error_message"),
+
+  // Timestamps
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  statusIdx: index("idx_lex_playwright_batches_status").on(table.status),
+  createdAtIdx: index("idx_lex_playwright_batches_created").on(table.createdAt),
+}));
+
+export const lexPlaywrightQuotes = pgTable("lex_playwright_quotes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  batchId: text("batch_id").notNull(),
+  vehicleId: uuid("vehicle_id").references(() => vehicles.id),
+
+  // Quote parameters
+  term: integer("term").notNull(),
+  annualMileage: integer("annual_mileage").notNull(),
+  contractType: text("contract_type").notNull(), // 'CH' or 'CHNM'
+  paymentPlan: text("payment_plan").notNull(),
+  otrpUsed: integer("otrp_used"), // In pence
+  usedCustomOtr: boolean("used_custom_otr").default(false),
+
+  // Results
+  quoteNumber: text("quote_number"), // Lex quote reference
+  monthlyRental: integer("monthly_rental"), // In pence
+  initialRental: integer("initial_rental"), // In pence
+  status: text("status").notNull(), // 'success' or 'error'
+  errorMessage: text("error_message"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  batchIdx: index("idx_lex_playwright_quotes_batch").on(table.batchId),
+  vehicleIdx: index("idx_lex_playwright_quotes_vehicle").on(table.vehicleId),
+}));
+
+export type LexPlaywrightBatch = {
+  id: string;
+  batchId: string;
+  status: string;
+  vehicleIds: string[];
+  terms: number[];
+  mileages: number[];
+  contractTypes: string[];
+  paymentPlans: string[];
+  useDefaultOtr: boolean;
+  customOtrp: number | null;
+  totalCombinations: number;
+  processedCount: number;
+  successCount: number;
+  errorCount: number;
+  errorMessage: string | null;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  createdBy: string | null;
+  createdAt: Date;
+};
+
+export type LexPlaywrightQuote = {
+  id: string;
+  batchId: string;
+  vehicleId: string | null;
+  term: number;
+  annualMileage: number;
+  contractType: string;
+  paymentPlan: string;
+  otrpUsed: number | null;
+  usedCustomOtr: boolean;
+  quoteNumber: string | null;
+  monthlyRental: number | null;
+  initialRental: number | null;
+  status: string;
+  errorMessage: string | null;
+  createdAt: Date;
+};

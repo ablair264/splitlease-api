@@ -318,8 +318,9 @@ async function getOrCreateCapMatch(
     : `${manufacturer} ${model} ${variant || ""}`.trim();
 
   // Priority 1: Check Ogilvie CAP mappings table (from website scrape)
+  // capId is Ogilvie's internal ID (e.g., "108020"), capCode is the actual CAP code (e.g., "ABA500   3HE A")
   const ogilvieMapping = await lookupOgilvieCapMapping(derivativeFullName);
-  if (ogilvieMapping?.capId) {
+  if (ogilvieMapping?.capCode) {
     const sourceKey = generateSourceKey(manufacturer, model, variant);
     await saveMatchResult({
       sourceKey,
@@ -327,7 +328,7 @@ async function getOrCreateCapMatch(
       model,
       variant,
       p11d,
-      capCode: ogilvieMapping.capId,
+      capCode: ogilvieMapping.capCode,
       matchedManufacturer: manufacturer,
       matchedModel: model,
       matchedVariant: variant,
@@ -335,7 +336,7 @@ async function getOrCreateCapMatch(
       confidence: 100,
       method: "auto_exact",
     }, "ogilvie");
-    return ogilvieMapping.capId;
+    return ogilvieMapping.capCode;
   }
 
   // Priority 2: Try to get existing confirmed match
