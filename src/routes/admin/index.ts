@@ -7,13 +7,16 @@ import ratesRouter from "./rates.js";
 
 const router = Router();
 
-// All admin routes require authentication
+// Ratebooks routes - no auth for now (internal tool)
+// TODO: Add proper auth when ready
+router.use("/ratebooks", ratebooksRouter);
+
+// All other admin routes require authentication
 router.use(requireAuth);
 
-// Sub-routes
+// Sub-routes (protected)
 router.use("/dashboard", dashboardRouter);
 router.use("/deals", dealsRouter);
-router.use("/ratebooks", ratebooksRouter);
 router.use("/rates", ratesRouter);
 
 export default router;
