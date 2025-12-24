@@ -3,6 +3,7 @@ import { db } from "../../lib/db/index.js";
 import { ratebookImports, financeProviders, providerRates } from "../../lib/db/schema.js";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { asyncHandler, ApiError } from "../../middleware/error.js";
+import { importLexRatebook } from "../../lib/imports/lex-ratebook-importer.js";
 
 const router = Router();
 
@@ -64,6 +65,84 @@ router.get(
         uniqueVehicles: Number(stats?.uniqueVehicles || 0),
       },
     });
+  })
+);
+
+/**
+ * POST /api/admin/ratebooks/import
+ * Import a ratebook CSV file
+ */
+router.post(
+  "/import",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { fileName, contractType, csvContent, providerCode } = req.body;
+
+    if (!fileName || !contractType || !csvContent) {
+      throw new ApiError("Missing required fields: fileName, contractType, csvContent", 400);
+    }
+
+    // Currently only Lex is supported
+    if (providerCode && providerCode !== "lex") {
+      throw new ApiError("Only Lex Autolease imports are currently supported", 400);
+    }
+
+    const result = await importLexRatebook({
+      fileName,
+      contractType,
+      csvContent,
+    });
+
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.json(result);
+  })
+);
+
+/**
+ * POST /api/admin/ratebooks/import-stream
+ * Import a large ratebook CSV file via streaming (for files > 10MB)
+ */
+router.post(
+  "/import-stream",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { fileName, contractType, providerCode } = req.query as Record<string, string>;
+
+    if (!fileName || !contractType) {
+      throw new ApiError("Missing required query params: fileName, contractType", 400);
+    }
+
+    // Currently only Lex is supported
+    if (providerCode && providerCode !== "lex") {
+      throw new ApiError("Only Lex Autolease imports are currently supported", 400);
+    }
+
+    // Collect the raw body as text
+    let csvContent = "";
+    req.setEncoding("utf8");
+
+    for await (const chunk of req) {
+      csvContent += chunk;
+    }
+
+    if (!csvContent) {
+      throw new ApiError("No CSV content in request body", 400);
+    }
+
+    const result = await importLexRatebook({
+      fileName,
+      contractType,
+      csvContent,
+    });
+
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.json(result);
   })
 );
 

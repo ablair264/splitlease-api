@@ -743,9 +743,21 @@ export const providerRates = pgTable("provider_rates", {
 
   // Deal value score (0-100, calculated from cost ratio)
   score: integer("score"),
+  basicListPrice: integer("basic_list_price"),
+  scoreBreakdown: jsonb("score_breakdown").$type<ScoreBreakdown>(),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// Score breakdown type
+export type ScoreBreakdown = {
+  valueScore: number;
+  efficiencyBonus: number;
+  affordabilityMod: number;
+  brandBonus: number;
+  costRatio: number;
+  totalPayments: number;
+};
 
 // Salary Sacrifice rates - separate table for BSSNL contract type
 // Includes BIK-specific fields and employer/employee cost breakdowns
