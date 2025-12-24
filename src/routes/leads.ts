@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { db } from "../lib/db/index.js";
 import { leads, leadMessages } from "../lib/db/schema.js";
-import { eq, desc, sql, and, gte, lte, ilike } from "drizzle-orm";
+import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 import { asyncHandler, ApiError } from "../middleware/error.js";
 import { requireAuth } from "../middleware/auth.js";
 import { z } from "zod";
@@ -10,16 +10,12 @@ const router = Router();
 
 // Validation schema for creating a lead
 const createLeadSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  email: z.string().email("Valid email required"),
+  name: z.string().optional(),
+  email: z.string().email("Valid email required").optional(),
   phone: z.string().optional(),
-  vehicleId: z.number().optional(),
-  capCode: z.string().optional(),
   source: z.string().default("website"),
-  notes: z.string().optional(),
-  budget: z.number().optional(),
-  preferredTerm: z.number().optional(),
-  preferredMileage: z.number().optional(),
+  rawData: z.record(z.unknown()).optional(),
+  brokerId: z.string().uuid("Valid broker ID required"),
 });
 
 /**
@@ -34,19 +30,13 @@ router.post(
     const [lead] = await db
       .insert(leads)
       .values({
-        name: validated.name,
-        email: validated.email,
+        brokerId: validated.brokerId,
+        name: validated.name || null,
+        email: validated.email || null,
         phone: validated.phone || null,
-        vehicleId: validated.vehicleId || null,
-        capCode: validated.capCode || null,
         source: validated.source,
-        notes: validated.notes || null,
-        budget: validated.budget || null,
-        preferredTerm: validated.preferredTerm || null,
-        preferredMileage: validated.preferredMileage || null,
+        rawData: validated.rawData || null,
         status: "new",
-        createdAt: new Date(),
-        updatedAt: new Date(),
       })
       .returning();
 
@@ -129,7 +119,7 @@ router.get(
   "/:id",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const leadId = parseInt(req.params.id);
+    const leadId = req.params.id;
 
     const [lead] = await db.select().from(leads).where(eq(leads.id, leadId));
 
@@ -141,7 +131,7 @@ router.get(
       .select()
       .from(leadMessages)
       .where(eq(leadMessages.leadId, leadId))
-      .orderBy(desc(leadMessages.createdAt));
+      .orderBy(desc(leadMessages.sentAt));
 
     res.json({
       lead,
@@ -158,7 +148,7 @@ router.patch(
   "/:id",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const leadId = parseInt(req.params.id);
+    const leadId = req.params.id;
     const updates = req.body;
 
     const [updated] = await db
@@ -186,8 +176,8 @@ router.post(
   "/:id/messages",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const leadId = parseInt(req.params.id);
-    const { content, type = "note" } = req.body;
+    const leadId = req.params.id;
+    const { content, channel = "email", direction = "outbound" } = req.body;
 
     if (!content) {
       throw new ApiError("Message content is required", 400);
@@ -198,9 +188,10 @@ router.post(
       .values({
         leadId,
         content,
-        type,
-        userId: req.user?.id || null,
-        createdAt: new Date(),
+        channel,
+        direction,
+        sentBy: req.user?.id || null,
+        sentAt: new Date(),
       })
       .returning();
 

@@ -21,10 +21,13 @@ export const errorHandler = (
   console.error("Error:", err);
 
   if (err instanceof ApiError) {
-    return res.status(err.statusCode).json({
+    const response: { error: string; details?: unknown } = {
       error: err.message,
-      ...(err.details && { details: err.details }),
-    });
+    };
+    if (err.details) {
+      response.details = err.details;
+    }
+    return res.status(err.statusCode).json(response);
   }
 
   // Handle Zod validation errors
