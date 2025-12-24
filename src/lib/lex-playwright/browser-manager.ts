@@ -88,18 +88,42 @@ export class LexBrowserManager {
 
     try {
       console.log("[LexBrowser] Navigating to login page...");
-      await this.page.goto(LEX_LOGIN_URL, { waitUntil: "networkidle" });
+      await this.page.goto(LEX_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-      // Handle cookie consent if present
+      // Handle cookie consent if present - must be done before login form is accessible
+      console.log("[LexBrowser] Checking for cookie consent banner...");
       try {
-        const acceptButton = this.page.getByText("Accept all", { exact: true });
-        if (await acceptButton.isVisible({ timeout: 2000 })) {
-          await acceptButton.click();
-          console.log("[LexBrowser] Accepted cookies");
+        // Try multiple selectors for cookie consent
+        const consentSelectors = [
+          '#accept',  // Lex's tealium cookie consent
+          'span#accept',
+          '.tealium_confirm',
+          'button:has-text("Accept all")',
+          'button:has-text("Accept All")',
+          'a:has-text("Accept all")',
+          '#onetrust-accept-btn-handler',
+        ];
+
+        for (const selector of consentSelectors) {
+          try {
+            const button = this.page.locator(selector).first();
+            if (await button.isVisible({ timeout: 3000 })) {
+              await button.click();
+              console.log(`[LexBrowser] Clicked cookie consent: ${selector}`);
+              await this.page.waitForTimeout(1000);
+              break;
+            }
+          } catch {
+            // Try next selector
+          }
         }
       } catch {
-        // Cookie dialog not present, continue
+        console.log("[LexBrowser] No cookie consent found or already accepted");
       }
+
+      // Wait for login form to be ready
+      console.log("[LexBrowser] Waiting for login form...");
+      await this.page.waitForSelector("#txtUserName", { timeout: 30000 });
 
       // Fill login credentials
       console.log("[LexBrowser] Entering credentials...");
