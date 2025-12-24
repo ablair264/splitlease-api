@@ -27,7 +27,7 @@ router.use(requireAuth);
 // =============================================================================
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().min(1), // Ogilvie uses username, not email
   password: z.string().min(1),
 });
 
