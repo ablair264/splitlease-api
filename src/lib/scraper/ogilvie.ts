@@ -524,6 +524,28 @@ export async function processOgilvieToProviderRates(batchId: string): Promise<Pr
       console.log(`  Processed ${Math.min(i + BATCH_SIZE, rows.length)}/${rows.length} rows`);
     }
 
+    // Calculate scores for imported rates (uses basic_list_price from vehicles as fallback)
+    try {
+      await db.execute(
+        `UPDATE provider_rates pr
+         SET score = result.score, score_breakdown = result.breakdown
+         FROM (
+           SELECT pr2.id, (calculate_rate_score_with_breakdown(
+             pr2.total_rental, pr2.term, pr2.p11d, pr2.basic_list_price, pr2.contract_type, pr2.cap_code,
+             COALESCE(pr2.payment_plan, 'monthly_in_advance'),
+             pr2.manufacturer, pr2.fuel_type, pr2.wltp_ev_range
+           )).*
+           FROM provider_rates pr2
+           WHERE pr2.import_id = '${importRecord.id}'
+         ) result
+         WHERE pr.id = result.id`
+      );
+      console.log(`  Calculated scores for import ${importRecord.id}`);
+    } catch (e) {
+      console.error(`  Failed to calculate scores: ${e}`);
+      errors.push(`Score calculation failed: ${e}`);
+    }
+
     // Update import record
     await db
       .update(ratebookImports)

@@ -314,6 +314,46 @@ export async function importLexRatebook(options: LexImportOptions): Promise<LexI
       .where(eq(ratebookImports.id, importId));
   }
 
+  // Update vehicles table with basic_list_price from imported rates
+  try {
+    await db.execute(
+      `UPDATE vehicles v
+       SET basic_list_price = pr.basic_list_price
+       FROM (
+         SELECT DISTINCT ON (cap_code) cap_code, basic_list_price
+         FROM provider_rates
+         WHERE import_id = '${importId}' AND basic_list_price IS NOT NULL
+         ORDER BY cap_code
+       ) pr
+       WHERE v.cap_code = pr.cap_code AND v.basic_list_price IS NULL`
+    );
+    console.log(`[lex-importer] Updated vehicles with basic_list_price from import ${importId}`);
+  } catch (e) {
+    console.error(`[lex-importer] Failed to update vehicles basic_list_price: ${e}`);
+  }
+
+  // Calculate scores for imported rates using the database function
+  try {
+    await db.execute(
+      `UPDATE provider_rates pr
+       SET score = result.score, score_breakdown = result.breakdown
+       FROM (
+         SELECT pr2.id, (calculate_rate_score_with_breakdown(
+           pr2.total_rental, pr2.term, pr2.p11d, pr2.basic_list_price, pr2.contract_type, pr2.cap_code,
+           COALESCE(pr2.payment_plan, 'monthly_in_advance'),
+           pr2.manufacturer, pr2.fuel_type, pr2.wltp_ev_range
+         )).*
+         FROM provider_rates pr2
+         WHERE pr2.import_id = '${importId}'
+       ) result
+       WHERE pr.id = result.id`
+    );
+    console.log(`[lex-importer] Calculated scores for import ${importId}`);
+  } catch (e) {
+    console.error(`[lex-importer] Failed to calculate scores: ${e}`);
+    errors.push(`Score calculation failed: ${e}`);
+  }
+
   // Finalize import
   const finalStatus = errorRows > totalRows / 2 ? "failed" : "completed";
   await db
