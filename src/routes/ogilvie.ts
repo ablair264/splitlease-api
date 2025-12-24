@@ -123,6 +123,127 @@ const exportConfigSchema = z.object({
   manufacturerIds: z.array(z.number()).optional(),
 });
 
+/**
+ * GET /api/ogilvie/export/stream
+ * SSE streaming endpoint for export progress
+ */
+router.get(
+  "/export/stream",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "User not authenticated" });
+      return;
+    }
+
+    const configsParam = req.query.configs as string;
+    if (!configsParam) {
+      res.status(400).json({ error: "configs parameter is required" });
+      return;
+    }
+
+    let configs: OgilvieExportConfig[];
+    try {
+      configs = JSON.parse(configsParam);
+    } catch {
+      res.status(400).json({ error: "Invalid configs format" });
+      return;
+    }
+
+    const session = await getCachedOgilvieSession(userId);
+    if (!session) {
+      res.status(401).json({ error: "No Ogilvie session. Please login first." });
+      return;
+    }
+
+    const isValid = await validateOgilvieSession(session.sessionCookie);
+    if (!isValid) {
+      res.status(401).json({ error: "Ogilvie session expired. Please login again." });
+      return;
+    }
+
+    // Set up SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    const sendEvent = (data: object) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      const results: Array<{ config: OgilvieExportConfig; success: boolean; batchId?: string; error?: string }> = [];
+
+      for (let i = 0; i < configs.length; i++) {
+        const config = configs[i];
+
+        sendEvent({
+          type: "progress",
+          progress: {
+            status: "preparing",
+            currentPage: 0,
+            totalPages: 0,
+            vehiclesProcessed: 0,
+            configIndex: i,
+            totalConfigs: configs.length,
+            currentConfig: { contractTerm: config.contractTerm, contractMileage: config.contractMileage },
+          },
+        });
+
+        const result = await runOgilvieExport(
+          session.sessionCookie,
+          config,
+          (progress) => {
+            sendEvent({
+              type: "progress",
+              progress: {
+                ...progress,
+                configIndex: i,
+                totalConfigs: configs.length,
+                currentConfig: { contractTerm: config.contractTerm, contractMileage: config.contractMileage },
+              },
+            });
+          }
+        );
+
+        const configResult = {
+          config: { contractTerm: config.contractTerm, contractMileage: config.contractMileage },
+          success: result.success,
+          batchId: result.batchId,
+          error: result.error,
+        };
+
+        results.push(configResult);
+
+        sendEvent({
+          type: "configComplete",
+          result: configResult,
+        });
+
+        // Small delay between configs
+        if (i < configs.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+
+      sendEvent({
+        type: "complete",
+        results,
+      });
+
+      res.end();
+    } catch (error) {
+      console.error("Export stream error:", error);
+      sendEvent({
+        type: "error",
+        error: error instanceof Error ? error.message : "Export failed",
+      });
+      res.end();
+    }
+  })
+);
+
 const exportSchema = z.object({
   config: exportConfigSchema.optional(),
   configs: z.array(exportConfigSchema).optional(),
