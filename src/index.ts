@@ -23,9 +23,11 @@ app.use(
   })
 );
 
-// Body parsing
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+// Body parsing - increased limits for large CSV imports
+app.use(express.json({ limit: "100mb" }));
+app.use(express.text({ limit: "100mb", type: "text/*" }));
+app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+app.use(express.raw({ limit: "100mb", type: "application/octet-stream" }));
 
 // Request logging
 app.use(requestLogger);

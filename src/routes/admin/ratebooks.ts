@@ -104,6 +104,7 @@ router.post(
 /**
  * POST /api/admin/ratebooks/import-stream
  * Import a large ratebook CSV file via streaming (for files > 10MB)
+ * Send CSV as text/plain or text/csv body with query params
  */
 router.post(
   "/import-stream",
@@ -119,17 +120,21 @@ router.post(
       throw new ApiError("Only Lex Autolease imports are currently supported", 400);
     }
 
-    // Collect the raw body as text
-    let csvContent = "";
-    req.setEncoding("utf8");
-
-    for await (const chunk of req) {
-      csvContent += chunk;
+    // Get CSV content from body (parsed by express.text middleware)
+    let csvContent: string;
+    if (typeof req.body === "string") {
+      csvContent = req.body;
+    } else if (Buffer.isBuffer(req.body)) {
+      csvContent = req.body.toString("utf8");
+    } else {
+      throw new ApiError("Request body must be CSV text", 400);
     }
 
-    if (!csvContent) {
+    if (!csvContent || csvContent.length < 10) {
       throw new ApiError("No CSV content in request body", 400);
     }
+
+    console.log(`[import-stream] Received ${csvContent.length} bytes for ${fileName}`);
 
     const result = await importLexRatebook({
       fileName,
