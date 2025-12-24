@@ -60,13 +60,12 @@ async function runSingleQuote(
     await page.locator("#txtTerm").fill(request.term.toString());
     await page.locator("#txtTerm").press("Tab");
 
-    // Enter annual mileage (MPA = Miles Per Annum / 1000)
-    // Lex uses MPA which is annual mileage in thousands
-    const mpaValue = Math.round(request.annualMileage / 1000);
-    await page.locator("#txtMPA").fill(mpaValue.toString());
+    // Enter annual mileage (MPA = Miles Per Annum)
+    await page.locator("#txtMPA").fill(request.annualMileage.toString());
     await page.locator("#txtMPA").press("Tab");
 
-    // Calculate total mileage and wait for it to populate
+    // Tab through total mileage field (auto-calculated)
+    await page.locator("#txtTotalMileage").press("Tab");
     await page.waitForTimeout(200);
 
     // Enter CO2 if provided
@@ -75,14 +74,18 @@ async function runSingleQuote(
       await page.getByRole("textbox", { name: "Co2 Emission" }).press("Tab");
     }
 
-    // Handle OTRP
+    // Handle OTRP - fill value first, then check checkbox (per recorded flow)
     if (!request.useDefaultOtr && request.customOtrp) {
-      // Check "Bonus excluded" and enter custom OTR
-      await page.getByRole("checkbox", { name: "Bonus excluded" }).check();
       // Convert from pence to pounds for the form
       const otrpPounds = (request.customOtrp / 100).toFixed(2);
       await page.locator("#txtEnteredOTRP").fill(otrpPounds);
       await page.locator("#txtEnteredOTRP").press("Tab");
+      // Tab through intermediate fields
+      await page.locator("#txtSalesCode").press("Tab");
+      await page.locator("#txtCustomerRef").press("Tab");
+      await page.locator("#selIntroPartner").press("Tab");
+      // Now check "Bonus excluded"
+      await page.getByRole("checkbox", { name: "Bonus excluded" }).check();
     }
 
     // Click Calculate
