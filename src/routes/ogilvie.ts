@@ -16,6 +16,46 @@ import {
 import type { OgilvieExportConfig } from "../lib/db/schema.js";
 import { z } from "zod";
 
+// =============================================================================
+// BACKGROUND JOB TRACKING
+// =============================================================================
+
+type ExportJobStatus = {
+  jobId: string;
+  status: "running" | "completed" | "failed";
+  configs: OgilvieExportConfig[];
+  currentConfigIndex: number;
+  totalConfigs: number;
+  currentProgress: {
+    status: string;
+    currentPage: number;
+    totalPages: number;
+    vehiclesProcessed: number;
+  } | null;
+  results: Array<{
+    config: { contractTerm: number; contractMileage: number };
+    success: boolean;
+    batchId?: string;
+    error?: string;
+  }>;
+  startedAt: Date;
+  completedAt?: Date;
+  error?: string;
+};
+
+// In-memory job tracker (for production, use Redis or DB)
+const exportJobs = new Map<string, ExportJobStatus>();
+
+// Clean up old jobs (older than 1 hour)
+setInterval(() => {
+  const oneHourAgo = Date.now() - 60 * 60 * 1000;
+  for (const [jobId, job] of exportJobs.entries()) {
+    if (job.startedAt.getTime() < oneHourAgo) {
+      exportJobs.delete(jobId);
+    }
+  }
+}, 10 * 60 * 1000); // Run every 10 minutes
+
 const router = Router();
 
 // All routes require authentication
@@ -124,125 +164,153 @@ const exportConfigSchema = z.object({
 });
 
 /**
- * GET /api/ogilvie/export/stream
- * SSE streaming endpoint for export progress
+ * POST /api/ogilvie/export/start
+ * Start a background export job, returns job ID immediately
  */
-router.get(
-  "/export/stream",
+router.post(
+  "/export/start",
   asyncHandler(async (req: Request, res: Response) => {
     const userId = req.user?.id;
     if (!userId) {
-      res.status(401).json({ error: "User not authenticated" });
-      return;
+      throw new ApiError("User not authenticated", 401);
     }
 
-    const configsParam = req.query.configs as string;
-    if (!configsParam) {
-      res.status(400).json({ error: "configs parameter is required" });
-      return;
-    }
-
-    let configs: OgilvieExportConfig[];
-    try {
-      configs = JSON.parse(configsParam);
-    } catch {
-      res.status(400).json({ error: "Invalid configs format" });
-      return;
+    const { configs } = req.body as { configs?: OgilvieExportConfig[] };
+    if (!configs || configs.length === 0) {
+      throw new ApiError("configs array is required", 400);
     }
 
     const session = await getCachedOgilvieSession(userId);
     if (!session) {
-      res.status(401).json({ error: "No Ogilvie session. Please login first." });
-      return;
+      throw new ApiError("No Ogilvie session. Please login first.", 401);
     }
 
     const isValid = await validateOgilvieSession(session.sessionCookie);
     if (!isValid) {
-      res.status(401).json({ error: "Ogilvie session expired. Please login again." });
-      return;
+      throw new ApiError("Ogilvie session expired. Please login again.", 401);
     }
 
-    // Set up SSE headers
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.flushHeaders();
+    // Create job ID
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
-    const sendEvent = (data: object) => {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    // Initialize job status
+    const jobStatus: ExportJobStatus = {
+      jobId,
+      status: "running",
+      configs,
+      currentConfigIndex: 0,
+      totalConfigs: configs.length,
+      currentProgress: null,
+      results: [],
+      startedAt: new Date(),
     };
+    exportJobs.set(jobId, jobStatus);
 
-    try {
-      const results: Array<{ config: OgilvieExportConfig; success: boolean; batchId?: string; error?: string }> = [];
-
-      for (let i = 0; i < configs.length; i++) {
-        const config = configs[i];
-
-        sendEvent({
-          type: "progress",
-          progress: {
-            status: "preparing",
-            currentPage: 0,
-            totalPages: 0,
-            vehiclesProcessed: 0,
-            configIndex: i,
-            totalConfigs: configs.length,
-            currentConfig: { contractTerm: config.contractTerm, contractMileage: config.contractMileage },
-          },
-        });
-
-        const result = await runOgilvieExport(
-          session.sessionCookie,
-          config,
-          (progress) => {
-            sendEvent({
-              type: "progress",
-              progress: {
-                ...progress,
-                configIndex: i,
-                totalConfigs: configs.length,
-                currentConfig: { contractTerm: config.contractTerm, contractMileage: config.contractMileage },
-              },
-            });
-          }
-        );
-
-        const configResult = {
-          config: { contractTerm: config.contractTerm, contractMileage: config.contractMileage },
-          success: result.success,
-          batchId: result.batchId,
-          error: result.error,
-        };
-
-        results.push(configResult);
-
-        sendEvent({
-          type: "configComplete",
-          result: configResult,
-        });
-
-        // Small delay between configs
-        if (i < configs.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
+    // Run export in background (don't await)
+    runExportJob(jobId, session.sessionCookie, configs).catch((error) => {
+      console.error(`Export job ${jobId} failed:`, error);
+      const job = exportJobs.get(jobId);
+      if (job) {
+        job.status = "failed";
+        job.error = error instanceof Error ? error.message : "Unknown error";
+        job.completedAt = new Date();
       }
+    });
 
-      sendEvent({
-        type: "complete",
-        results,
-      });
-
-      res.end();
-    } catch (error) {
-      console.error("Export stream error:", error);
-      sendEvent({
-        type: "error",
-        error: error instanceof Error ? error.message : "Export failed",
-      });
-      res.end();
-    }
+    // Return job ID immediately
+    res.json({
+      success: true,
+      jobId,
+      message: "Export started in background",
+    });
   })
 );
+
+/**
+ * GET /api/ogilvie/export/status/:jobId
+ * Poll for export job status
+ */
+router.get(
+  "/export/status/:jobId",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { jobId } = req.params;
+
+    const job = exportJobs.get(jobId);
+    if (!job) {
+      throw new ApiError("Job not found", 404);
+    }
+
+    res.json({
+      jobId: job.jobId,
+      status: job.status,
+      currentConfigIndex: job.currentConfigIndex,
+      totalConfigs: job.totalConfigs,
+      currentProgress: job.currentProgress,
+      results: job.results,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+      error: job.error,
+    });
+  })
+);
+
+/**
+ * Run export job in background
+ */
+async function runExportJob(
+  jobId: string,
+  sessionCookie: string,
+  configs: OgilvieExportConfig[]
+): Promise<void> {
+  const job = exportJobs.get(jobId);
+  if (!job) return;
+
+  try {
+    for (let i = 0; i < configs.length; i++) {
+      const config = configs[i];
+      job.currentConfigIndex = i;
+      job.currentProgress = {
+        status: "preparing",
+        currentPage: 0,
+        totalPages: 0,
+        vehiclesProcessed: 0,
+      };
+
+      const result = await runOgilvieExport(
+        sessionCookie,
+        config,
+        (progress) => {
+          job.currentProgress = {
+            status: progress.status,
+            currentPage: progress.currentPage,
+            totalPages: progress.totalPages,
+            vehiclesProcessed: progress.vehiclesProcessed,
+          };
+        }
+      );
+
+      job.results.push({
+        config: { contractTerm: config.contractTerm, contractMileage: config.contractMileage },
+        success: result.success,
+        batchId: result.batchId,
+        error: result.error,
+      });
+
+      // Small delay between configs
+      if (i < configs.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+
+    job.status = "completed";
+    job.completedAt = new Date();
+  } catch (error) {
+    job.status = "failed";
+    job.error = error instanceof Error ? error.message : "Unknown error";
+    job.completedAt = new Date();
+    throw error;
+  }
+}
 
 const exportSchema = z.object({
   config: exportConfigSchema.optional(),
