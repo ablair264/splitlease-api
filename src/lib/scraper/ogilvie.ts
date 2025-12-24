@@ -15,6 +15,7 @@ const BASE_URL = "https://www.ogilviefleet.co.uk";
 // Map Ogilvie product names to contract types
 const PRODUCT_TO_CONTRACT_TYPE: Record<string, string> = {
   "Contract Hire": "CH",
+  "Contract Hire (Maintenance + Tyres)": "CH",
   "Contract Hire (No Maintenance - No Tyres)": "CHNM",
   "Contract Hire (No Maintenance)": "CHNM",
   "Personal Contract Hire": "PCH",
@@ -22,14 +23,89 @@ const PRODUCT_TO_CONTRACT_TYPE: Record<string, string> = {
   "Salary Sacrifice": "BSSNL",
 };
 
-// Map Ogilvie payment plans to our enum
+// Ogilvie Product IDs
+export const OGILVIE_PRODUCTS = {
+  CONTRACT_HIRE_MAINTENANCE: "3",      // Contract Hire (Maintenance + Tyres) → CH
+  CONTRACT_HIRE_NO_MAINTENANCE: "1",   // Contract Hire (No Maintenance - No Tyres) → CHNM
+} as const;
+
+// Ogilvie Payment Plan IDs - Standard broker payment plans
+export const OGILVIE_PAYMENT_PLANS = {
+  MONTHLY_IN_ADVANCE: "263",     // 1 in Advance → monthly_in_advance
+  SPREAD_3_DOWN: "265",          // 3 In Advance Spread → spread_3_down
+  SPREAD_6_DOWN: "268",          // 6 In Advance Spread → spread_6_down
+  SPREAD_9_DOWN: "269",          // 9 In Advance Spread → spread_9_down
+} as const;
+
+// Payment plan ID to our enum mapping
+const PAYMENT_PLAN_ID_MAP: Record<string, string> = {
+  "263": "monthly_in_advance",
+  "265": "spread_3_down",
+  "268": "spread_6_down",
+  "269": "spread_9_down",
+};
+
+// Map Ogilvie payment plans to our enum (by name)
 const PAYMENT_PLAN_MAP: Record<string, string> = {
   "Ogilvie Quotes 1 In Advance": "monthly_in_advance",
   "1 in Advance": "monthly_in_advance",
+  "1 In Advance": "monthly_in_advance",
+  "3 In Advance Spread": "spread_3_down",
+  "6 In Advance Spread": "spread_6_down",
+  "9 In Advance Spread": "spread_9_down",
   "Spread with 3 up front": "spread_3_down",
   "Spread with 6 up front": "spread_6_down",
   "Spread with 9 up front": "spread_9_down",
 };
+
+// Standard terms in months
+export const OGILVIE_TERMS = [24, 36, 48, 60] as const;
+
+// Annual mileages we support
+export const OGILVIE_ANNUAL_MILEAGES = [10000, 12000, 15000, 20000] as const;
+
+/**
+ * Calculate life distance (total contract miles) from term and annual mileage
+ */
+export function calculateLifeDistance(termMonths: number, annualMileage: number): number {
+  return Math.round((termMonths / 12) * annualMileage);
+}
+
+/**
+ * Generate all export configurations for comprehensive rate fetching
+ * Returns configs for all combinations of: products × terms × mileages × payment plans
+ */
+export function generateAllOgilvieConfigs(): OgilvieExportConfig[] {
+  const configs: OgilvieExportConfig[] = [];
+
+  const products = Object.values(OGILVIE_PRODUCTS);
+  const paymentPlans = Object.values(OGILVIE_PAYMENT_PLANS);
+
+  for (const productId of products) {
+    for (const term of OGILVIE_TERMS) {
+      for (const annualMileage of OGILVIE_ANNUAL_MILEAGES) {
+        for (const paymentPlanId of paymentPlans) {
+          const lifeDistance = calculateLifeDistance(term, annualMileage);
+
+          configs.push({
+            contractTerm: term,
+            contractMileage: lifeDistance,
+            productId,
+            paymentPlanId,
+          });
+        }
+      }
+    }
+  }
+
+  console.log(`Generated ${configs.length} Ogilvie export configurations`);
+  console.log(`  Products: ${products.length} (CH, CHNM)`);
+  console.log(`  Terms: ${OGILVIE_TERMS.length} (${OGILVIE_TERMS.join(", ")} months)`);
+  console.log(`  Mileages: ${OGILVIE_ANNUAL_MILEAGES.length} (${OGILVIE_ANNUAL_MILEAGES.join(", ")} per annum)`);
+  console.log(`  Payment Plans: ${paymentPlans.length} (1+, 3+, 6+, 9+)`);
+
+  return configs;
+}
 
 // CSV column mapping - maps Ogilvie CSV headers to our database fields
 const CSV_COLUMN_MAP: Record<string, string> = {
@@ -196,15 +272,30 @@ function toPence(value: string | number | null | undefined): number | null {
 
 /**
  * Map payment plan from Ogilvie format to our enum
+ * Accepts either payment plan name or payment plan ID
  */
-function mapPaymentPlan(plan: string | null): string {
+function mapPaymentPlan(plan: string | null, paymentPlanId?: string | null): string {
+  // First try to map by ID if provided
+  if (paymentPlanId && PAYMENT_PLAN_ID_MAP[paymentPlanId]) {
+    return PAYMENT_PLAN_ID_MAP[paymentPlanId];
+  }
+
   if (!plan) return "monthly_in_advance";
   if (PAYMENT_PLAN_MAP[plan]) return PAYMENT_PLAN_MAP[plan];
+
   const lower = plan.toLowerCase();
   if (lower.includes("advance") || lower.includes("1 in")) return "monthly_in_advance";
+  if (lower.includes("spread") && lower.includes("9")) return "spread_9_down";
   if (lower.includes("spread") && lower.includes("6")) return "spread_6_down";
   if (lower.includes("spread") && lower.includes("3")) return "spread_3_down";
   return "monthly_in_advance";
+}
+
+/**
+ * Calculate annual mileage from life distance and term
+ */
+function calculateAnnualMileage(lifeDistance: number, termMonths: number): number {
+  return Math.round(lifeDistance / (termMonths / 12));
 }
 
 /**
@@ -376,6 +467,12 @@ export async function processOgilvieToProviderRates(batchId: string): Promise<Pr
           capCodes.add(capCode);
           allCapCodes.add(capCode);
 
+          // Calculate annual mileage from life distance and term
+          // Ogilvie uses life distance (total contract miles), not annual mileage
+          const lifeDistance = row.contractMileage || 30000;
+          const termMonths = row.contractTerm || 36;
+          const annualMileage = calculateAnnualMileage(lifeDistance, termMonths);
+
           const rate: typeof providerRates.$inferInsert = {
             capCode,
             importId: importRecord.id,
@@ -385,8 +482,8 @@ export async function processOgilvieToProviderRates(batchId: string): Promise<Pr
             model,
             variant,
             isCommercial: false,
-            term: row.contractTerm || 36,
-            annualMileage: row.contractMileage || 10000,
+            term: termMonths,
+            annualMileage,
             paymentPlan: mapPaymentPlan(row.paymentPlan),
             totalRental: toPence(row.regularRental) || toPence(row.monthlyEffectiveRental) || 0,
             leaseRental: toPence(row.financeRentalExcVat),
@@ -1124,6 +1221,133 @@ export async function runOgilvieMultiExport(
   }
 
   return { results };
+}
+
+export type FullExportProgress = {
+  configIndex: number;
+  totalConfigs: number;
+  currentConfig: OgilvieExportConfig;
+  exportProgress: OgilvieExportProgress;
+  completedConfigs: number;
+  successfulConfigs: number;
+  failedConfigs: number;
+};
+
+export type FullExportResult = {
+  success: boolean;
+  totalConfigs: number;
+  completedConfigs: number;
+  successfulConfigs: number;
+  failedConfigs: number;
+  totalRatesImported: number;
+  results: Array<{
+    config: OgilvieExportConfig;
+    success: boolean;
+    batchId?: string;
+    insertedRows?: number;
+    error?: string;
+  }>;
+};
+
+/**
+ * Run a full export of ALL Ogilvie rate combinations
+ * This fetches rates for: 2 products × 4 terms × 4 mileages × 4 payment plans = 128 configs
+ *
+ * @param sessionCookie - Valid Ogilvie session cookie
+ * @param onProgress - Optional callback for progress updates
+ * @param delayBetweenExports - Delay in ms between exports (default 3000)
+ */
+export async function runOgilvieFullExport(
+  sessionCookie: string,
+  onProgress?: (progress: FullExportProgress) => void,
+  delayBetweenExports = 3000
+): Promise<FullExportResult> {
+  const configs = generateAllOgilvieConfigs();
+  const totalConfigs = configs.length;
+
+  console.log(`\n${"=".repeat(60)}`);
+  console.log(`Starting FULL Ogilvie export: ${totalConfigs} configurations`);
+  console.log(`${"=".repeat(60)}\n`);
+
+  const results: FullExportResult["results"] = [];
+  let successfulConfigs = 0;
+  let failedConfigs = 0;
+  let totalRatesImported = 0;
+
+  for (let i = 0; i < configs.length; i++) {
+    const config = configs[i];
+
+    // Build a readable description
+    const productName = config.productId === "3" ? "CH" : "CHNM";
+    const paymentPlanName = PAYMENT_PLAN_ID_MAP[config.paymentPlanId || "263"] || "monthly";
+    const annualMileage = calculateAnnualMileage(config.contractMileage, config.contractTerm);
+
+    console.log(`\n[${i + 1}/${totalConfigs}] Exporting: ${productName} | ${config.contractTerm}mo | ${annualMileage.toLocaleString()}/yr | ${paymentPlanName}`);
+
+    const result = await runOgilvieExport(sessionCookie, config, (progress) => {
+      onProgress?.({
+        configIndex: i,
+        totalConfigs,
+        currentConfig: config,
+        exportProgress: progress,
+        completedConfigs: i,
+        successfulConfigs,
+        failedConfigs,
+      });
+    });
+
+    if (result.success) {
+      successfulConfigs++;
+      totalRatesImported += result.insertedRows || 0;
+      console.log(`  ✓ Success: ${result.insertedRows?.toLocaleString() || 0} rows`);
+    } else {
+      failedConfigs++;
+      console.log(`  ✗ Failed: ${result.error}`);
+    }
+
+    results.push({
+      config,
+      success: result.success,
+      batchId: result.batchId,
+      insertedRows: result.insertedRows,
+      error: result.error,
+    });
+
+    // Progress callback after each config
+    onProgress?.({
+      configIndex: i,
+      totalConfigs,
+      currentConfig: config,
+      exportProgress: { status: "completed", currentPage: 0, totalPages: 0, vehiclesProcessed: result.insertedRows || 0 },
+      completedConfigs: i + 1,
+      successfulConfigs,
+      failedConfigs,
+    });
+
+    // Delay between exports to avoid rate limiting
+    if (i < configs.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayBetweenExports));
+    }
+  }
+
+  console.log(`\n${"=".repeat(60)}`);
+  console.log(`Full Export Complete`);
+  console.log(`${"=".repeat(60)}`);
+  console.log(`Total Configs: ${totalConfigs}`);
+  console.log(`Successful: ${successfulConfigs}`);
+  console.log(`Failed: ${failedConfigs}`);
+  console.log(`Total Rates Imported: ${totalRatesImported.toLocaleString()}`);
+  console.log(`${"=".repeat(60)}\n`);
+
+  return {
+    success: failedConfigs === 0,
+    totalConfigs,
+    completedConfigs: successfulConfigs + failedConfigs,
+    successfulConfigs,
+    failedConfigs,
+    totalRatesImported,
+    results,
+  };
 }
 
 // Get export history

@@ -152,6 +152,57 @@ router.post(
 );
 
 /**
+ * POST /api/admin/ratebooks/import-chunked
+ * Import a large ratebook CSV file in chunks
+ * Each chunk is processed independently and results aggregated
+ */
+router.post(
+  "/import-chunked",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { fileName, contractType, providerCode, chunkIndex, totalChunks, headerRow } = req.query as Record<string, string>;
+
+    if (!fileName || !contractType) {
+      throw new ApiError("Missing required query params: fileName, contractType", 400);
+    }
+
+    if (providerCode && providerCode !== "lex") {
+      throw new ApiError("Only Lex Autolease imports are currently supported", 400);
+    }
+
+    // Get CSV content from body
+    let csvContent: string;
+    if (typeof req.body === "string") {
+      csvContent = req.body;
+    } else if (Buffer.isBuffer(req.body)) {
+      csvContent = req.body.toString("utf8");
+    } else {
+      throw new ApiError("Request body must be CSV text", 400);
+    }
+
+    // If this is not the first chunk and we have a header row, prepend it
+    if (parseInt(chunkIndex || "0") > 0 && headerRow) {
+      csvContent = decodeURIComponent(headerRow) + "\n" + csvContent;
+    }
+
+    const chunkNum = parseInt(chunkIndex || "0") + 1;
+    const total = parseInt(totalChunks || "1");
+    console.log(`[import-chunked] Processing chunk ${chunkNum}/${total} for ${fileName} (${csvContent.length} bytes)`);
+
+    const result = await importLexRatebook({
+      fileName: `${fileName} (chunk ${chunkNum}/${total})`,
+      contractType,
+      csvContent,
+    });
+
+    res.json({
+      ...result,
+      chunkIndex: parseInt(chunkIndex || "0"),
+      totalChunks: total,
+    });
+  })
+);
+
+/**
  * GET /api/admin/ratebooks/:importId
  * Get a specific ratebook import
  */
