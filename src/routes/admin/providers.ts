@@ -60,8 +60,44 @@ router.post(
         const wb = XLSX.read(buffer, { type: "buffer" });
         const ws = wb.Sheets[wb.SheetNames[0]];
 
-        // Get all data
-        const allData = XLSX.utils.sheet_to_json<Record<string, string | number>>(ws, { range: 1 });
+        // Detect how many title rows to skip by checking first few rows
+        // ALD files have "Broker - CHcmXX" in row 0 and a count row in row 1
+        const rawData = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 });
+        let skipRows = 0;
+
+        // Check first few rows to find the header row
+        for (let i = 0; i < Math.min(5, rawData.length); i++) {
+          const row = rawData[i];
+          if (!row || row.length === 0) {
+            skipRows = i + 1;
+            continue;
+          }
+          // Check if this looks like a header row (has typical column names)
+          const rowStr = row.join(" ").toUpperCase();
+          if (
+            rowStr.includes("TERM") ||
+            rowStr.includes("MANUFACTURER") ||
+            rowStr.includes("CAP CODE") ||
+            rowStr.includes("MILEAGE") ||
+            rowStr.includes("RENTAL")
+          ) {
+            skipRows = i;
+            break;
+          }
+          // If row has "Broker" or "Generated" or only 1-2 cells, it's a title row
+          if (
+            rowStr.includes("BROKER") ||
+            rowStr.includes("GENERATED") ||
+            row.filter(Boolean).length <= 2
+          ) {
+            skipRows = i + 1;
+          }
+        }
+
+        console.log(`[extract-headers] XLSX: Skipping ${skipRows} title rows for ${fileName}`);
+
+        // Get all data starting from header row
+        const allData = XLSX.utils.sheet_to_json<Record<string, string | number>>(ws, { range: skipRows });
 
         if (allData.length > 0) {
           headers = Object.keys(allData[0] || {});
@@ -74,6 +110,8 @@ router.post(
             return strRow;
           });
         }
+
+        console.log(`[extract-headers] XLSX: Found ${headers.length} headers: ${headers.slice(0, 5).join(", ")}...`);
       } else {
         // Parse CSV
         const csvContent = isBase64

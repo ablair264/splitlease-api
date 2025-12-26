@@ -87,7 +87,12 @@ For each source column, determine:
 2. Confidence score 0-100 (100 = exact match, 70+ = confident, 50-69 = likely, <50 = uncertain)
 3. Brief reasoning
 
-Also suggest a provider name based on the file format (e.g., "ALD Automotive", "Zenith", "Arval", etc.)
+Also suggest a provider name based on the file format and column names:
+- ALD Automotive: Has NET RENTAL WM/CM, ANNUAL_MILEAGE (underscore), WIN ID columns
+- Lex Autolease: Has Vehicle Rental, Service Rental, Non Recoverable VAT columns
+- Ogilvie Fleet: Has MonthlyRental, FinanceElement, MaintenanceElement columns
+- Zenith Fleet: Has specific Zenith columns
+- Arval: Has specific Arval columns
 
 Common column name patterns:
 - CAP CODE, CAP_CODE, CapCode, Cap Id -> capCode
@@ -189,8 +194,8 @@ function fallbackAnalysis(headers: string[]): AnalysisResult {
     modelYear: [/model.?year/i, /^year$/i],
     term: [/^term$/i, /contract.?term/i, /months/i],
     annualMileage: [/mileage/i, /annual.?miles/i],
-    totalRental: [/^rental$/i, /monthly.?rental/i, /net.?rental/i, /total.?rental/i],
-    leaseRental: [/lease.?rental/i, /finance.?rental/i, /net.?rental.?cm/i],
+    totalRental: [/^rental$/i, /monthly.?rental/i, /net.?rental.?wm/i, /net.?rental$/i, /total.?rental/i],
+    leaseRental: [/lease.?rental/i, /finance.?rental/i, /net.?rental.?cm/i, /contract.?rental/i],
     serviceRental: [/service.?rental/i, /maintenance/i],
     p11d: [/p11d/i],
     co2Gkm: [/co2/i, /co2.?g/i],
