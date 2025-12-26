@@ -65,33 +65,60 @@ router.post(
         const rawData = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 });
         let skipRows = 0;
 
+        // Find the row with the most columns - that's likely the header row
+        let maxColumns = 0;
+        let headerRowIndex = 0;
+        for (let i = 0; i < Math.min(10, rawData.length); i++) {
+          const row = rawData[i];
+          if (row && row.filter(Boolean).length > maxColumns) {
+            maxColumns = row.filter(Boolean).length;
+            headerRowIndex = i;
+          }
+        }
+
         // Check first few rows to find the header row
-        for (let i = 0; i < Math.min(5, rawData.length); i++) {
+        for (let i = 0; i < Math.min(10, rawData.length); i++) {
           const row = rawData[i];
           if (!row || row.length === 0) {
             skipRows = i + 1;
             continue;
           }
-          // Check if this looks like a header row (has typical column names)
+
+          const filledCells = row.filter(Boolean).length;
           const rowStr = row.join(" ").toUpperCase();
-          if (
-            rowStr.includes("TERM") ||
+
+          // A proper header row should have:
+          // 1. Multiple columns (at least 5, or close to the max found)
+          // 2. Contains typical header keywords
+          const hasEnoughColumns = filledCells >= 5 || filledCells >= maxColumns * 0.5;
+          const hasHeaderKeywords =
             rowStr.includes("MANUFACTURER") ||
             rowStr.includes("CAP CODE") ||
+            rowStr.includes("CAP_CODE") ||
             rowStr.includes("MILEAGE") ||
-            rowStr.includes("RENTAL")
-          ) {
+            rowStr.includes("RENTAL") ||
+            (rowStr.includes("TERM") && filledCells > 3); // TERM alone isn't enough
+
+          if (hasEnoughColumns && hasHeaderKeywords) {
             skipRows = i;
+            console.log(`[extract-headers] Found header row at index ${i} with ${filledCells} columns`);
             break;
           }
-          // If row has "Broker" or "Generated" or only 1-2 cells, it's a title row
+
+          // If row has title indicators or very few cells, it's a title row - continue searching
           if (
             rowStr.includes("BROKER") ||
             rowStr.includes("GENERATED") ||
-            row.filter(Boolean).length <= 2
+            filledCells <= 2
           ) {
             skipRows = i + 1;
           }
+        }
+
+        // Fallback: use the row with max columns if no header keywords found
+        if (skipRows === 0 && headerRowIndex > 0) {
+          skipRows = headerRowIndex;
+          console.log(`[extract-headers] Fallback: using row ${headerRowIndex} with most columns (${maxColumns})`);
         }
 
         console.log(`[extract-headers] XLSX: Skipping ${skipRows} title rows for ${fileName}`);
