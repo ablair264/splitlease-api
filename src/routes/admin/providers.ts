@@ -63,65 +63,71 @@ router.post(
         // Detect how many title rows to skip by checking first few rows
         // ALD files have "Broker - CHcmXX" in row 0 and a count row in row 1
         const rawData = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 });
-        let skipRows = 0;
 
-        // Find the row with the most columns - that's likely the header row
+        // STEP 1: Find the row with the most columns - this is almost always the header row
         let maxColumns = 0;
         let headerRowIndex = 0;
-        for (let i = 0; i < Math.min(10, rawData.length); i++) {
+        for (let i = 0; i < Math.min(15, rawData.length); i++) {
           const row = rawData[i];
-          if (row && row.filter(Boolean).length > maxColumns) {
-            maxColumns = row.filter(Boolean).length;
+          const filledCells = row ? row.filter(Boolean).length : 0;
+          if (filledCells > maxColumns) {
+            maxColumns = filledCells;
             headerRowIndex = i;
           }
         }
 
-        // Check first few rows to find the header row
-        for (let i = 0; i < Math.min(10, rawData.length); i++) {
-          const row = rawData[i];
-          if (!row || row.length === 0) {
-            skipRows = i + 1;
-            continue;
-          }
+        console.log(`[extract-headers] Max columns row: index ${headerRowIndex} with ${maxColumns} columns`);
 
-          const filledCells = row.filter(Boolean).length;
-          const rowStr = row.join(" ").toUpperCase();
+        // STEP 2: Verify the max-columns row looks like headers (has text, not just numbers)
+        // If it has at least 5 columns, use it as the header row
+        let skipRows = headerRowIndex;
 
-          // A proper header row should have:
-          // 1. Multiple columns (at least 5, or close to the max found)
-          // 2. Contains typical header keywords
-          const hasEnoughColumns = filledCells >= 5 || filledCells >= maxColumns * 0.5;
+        // STEP 3: Double-check by looking for keyword matches (optional validation)
+        if (maxColumns >= 5) {
+          const headerRow = rawData[headerRowIndex];
+          const rowStr = headerRow ? headerRow.join(" ").toUpperCase() : "";
+
+          // Check for common header keywords to confirm
           const hasHeaderKeywords =
             rowStr.includes("MANUFACTURER") ||
             rowStr.includes("CAP CODE") ||
             rowStr.includes("CAP_CODE") ||
+            rowStr.includes("CAPCODE") ||
             rowStr.includes("MILEAGE") ||
             rowStr.includes("RENTAL") ||
-            (rowStr.includes("TERM") && filledCells > 3); // TERM alone isn't enough
+            rowStr.includes("MODEL") ||
+            rowStr.includes("MAKE") ||
+            rowStr.includes("VARIANT") ||
+            rowStr.includes("DERIVATIVE");
 
-          if (hasEnoughColumns && hasHeaderKeywords) {
-            skipRows = i;
-            console.log(`[extract-headers] Found header row at index ${i} with ${filledCells} columns`);
-            break;
+          if (hasHeaderKeywords) {
+            console.log(`[extract-headers] Confirmed header row ${headerRowIndex} with keywords`);
+          } else {
+            console.log(`[extract-headers] Using row ${headerRowIndex} based on column count (${maxColumns}), no keyword match`);
           }
+        } else {
+          // Very few columns - might be a malformed file, try to find any row with headers
+          console.log(`[extract-headers] Warning: Max columns is only ${maxColumns}, searching for header keywords...`);
 
-          // If row has title indicators or very few cells, it's a title row - continue searching
-          if (
-            rowStr.includes("BROKER") ||
-            rowStr.includes("GENERATED") ||
-            filledCells <= 2
-          ) {
-            skipRows = i + 1;
+          for (let i = 0; i < Math.min(10, rawData.length); i++) {
+            const row = rawData[i];
+            if (!row) continue;
+
+            const rowStr = row.join(" ").toUpperCase();
+            if (
+              rowStr.includes("MANUFACTURER") ||
+              rowStr.includes("CAP CODE") ||
+              rowStr.includes("RENTAL") ||
+              rowStr.includes("MODEL")
+            ) {
+              skipRows = i;
+              console.log(`[extract-headers] Found header keywords at row ${i}`);
+              break;
+            }
           }
         }
 
-        // Fallback: use the row with max columns if no header keywords found
-        if (skipRows === 0 && headerRowIndex > 0) {
-          skipRows = headerRowIndex;
-          console.log(`[extract-headers] Fallback: using row ${headerRowIndex} with most columns (${maxColumns})`);
-        }
-
-        console.log(`[extract-headers] XLSX: Skipping ${skipRows} title rows for ${fileName}`);
+        console.log(`[extract-headers] XLSX: Using row ${skipRows} as header for ${fileName}`);
 
         // Get all data starting from header row
         const allData = XLSX.utils.sheet_to_json<Record<string, string | number>>(ws, { range: skipRows });
