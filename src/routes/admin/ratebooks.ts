@@ -4,6 +4,14 @@ import { ratebookImports, financeProviders, providerRates } from "../../lib/db/s
 import { eq, and, desc, sql } from "drizzle-orm";
 import { asyncHandler, ApiError } from "../../middleware/error.js";
 import { importLexRatebook } from "../../lib/imports/lex-ratebook-importer.js";
+import { importALDRatebook } from "../../lib/imports/ald-ratebook-importer.js";
+import { importGenericRatebook } from "../../lib/imports/generic-ratebook-importer.js";
+
+// Built-in providers with dedicated importers
+const BUILTIN_PROVIDERS = ["lex", "ald"];
+
+// All supported providers (built-in + any custom providers in database)
+const SUPPORTED_PROVIDERS = ["lex", "ald"];
 
 const router = Router();
 
@@ -75,22 +83,31 @@ router.get(
 router.post(
   "/import",
   asyncHandler(async (req: Request, res: Response) => {
-    const { fileName, contractType, csvContent, providerCode } = req.body;
+    const { fileName, contractType, csvContent, fileContent, providerCode } = req.body;
 
-    if (!fileName || !contractType || !csvContent) {
-      throw new ApiError("Missing required fields: fileName, contractType, csvContent", 400);
+    if (!fileName || !contractType || (!csvContent && !fileContent)) {
+      throw new ApiError("Missing required fields: fileName, contractType, csvContent or fileContent", 400);
     }
 
-    // Currently only Lex is supported
-    if (providerCode && providerCode !== "lex") {
-      throw new ApiError("Only Lex Autolease imports are currently supported", 400);
+    const provider = providerCode || "lex";
+    if (!SUPPORTED_PROVIDERS.includes(provider)) {
+      throw new ApiError(`Provider '${provider}' is not supported. Supported providers: ${SUPPORTED_PROVIDERS.join(", ")}`, 400);
     }
 
-    const result = await importLexRatebook({
-      fileName,
-      contractType,
-      csvContent,
-    });
+    let result;
+    if (provider === "ald") {
+      result = await importALDRatebook({
+        fileName,
+        contractType,
+        fileContent: fileContent || csvContent, // ALD can be XLSX (base64) or CSV
+      });
+    } else {
+      result = await importLexRatebook({
+        fileName,
+        contractType,
+        csvContent: csvContent || fileContent,
+      });
+    }
 
     if (!result.success) {
       res.status(400).json(result);
@@ -115,32 +132,43 @@ router.post(
       throw new ApiError("Missing required query params: fileName, contractType", 400);
     }
 
-    // Currently only Lex is supported
-    if (providerCode && providerCode !== "lex") {
-      throw new ApiError("Only Lex Autolease imports are currently supported", 400);
+    const provider = providerCode || "lex";
+    if (!SUPPORTED_PROVIDERS.includes(provider)) {
+      throw new ApiError(`Provider '${provider}' is not supported. Supported providers: ${SUPPORTED_PROVIDERS.join(", ")}`, 400);
     }
 
-    // Get CSV content from body (parsed by express.text middleware)
-    let csvContent: string;
+    // Get content from body
+    let fileContent: string | Buffer;
     if (typeof req.body === "string") {
-      csvContent = req.body;
+      fileContent = req.body;
     } else if (Buffer.isBuffer(req.body)) {
-      csvContent = req.body.toString("utf8");
+      fileContent = req.body;
     } else {
-      throw new ApiError("Request body must be CSV text", 400);
+      throw new ApiError("Request body must be file content", 400);
     }
 
-    if (!csvContent || csvContent.length < 10) {
-      throw new ApiError("No CSV content in request body", 400);
+    const contentLength = typeof fileContent === "string" ? fileContent.length : fileContent.length;
+    if (!fileContent || contentLength < 10) {
+      throw new ApiError("No file content in request body", 400);
     }
 
-    console.log(`[import-stream] Received ${csvContent.length} bytes for ${fileName}`);
+    console.log(`[import-stream] Received ${contentLength} bytes for ${fileName} (provider: ${provider})`);
 
-    const result = await importLexRatebook({
-      fileName,
-      contractType,
-      csvContent,
-    });
+    let result;
+    if (provider === "ald") {
+      result = await importALDRatebook({
+        fileName,
+        contractType,
+        fileContent,
+      });
+    } else {
+      const csvContent = typeof fileContent === "string" ? fileContent : fileContent.toString("utf8");
+      result = await importLexRatebook({
+        fileName,
+        contractType,
+        csvContent,
+      });
+    }
 
     if (!result.success) {
       res.status(400).json(result);
@@ -165,40 +193,103 @@ router.post(
       throw new ApiError("Missing required query params: fileName, contractType", 400);
     }
 
-    if (providerCode && providerCode !== "lex") {
-      throw new ApiError("Only Lex Autolease imports are currently supported", 400);
+    const provider = providerCode || "lex";
+    if (!SUPPORTED_PROVIDERS.includes(provider)) {
+      throw new ApiError(`Provider '${provider}' is not supported. Supported providers: ${SUPPORTED_PROVIDERS.join(", ")}`, 400);
     }
 
-    // Get CSV content from body
-    let csvContent: string;
+    // Get content from body
+    let fileContent: string | Buffer;
     if (typeof req.body === "string") {
-      csvContent = req.body;
+      fileContent = req.body;
     } else if (Buffer.isBuffer(req.body)) {
-      csvContent = req.body.toString("utf8");
+      fileContent = req.body;
     } else {
-      throw new ApiError("Request body must be CSV text", 400);
+      throw new ApiError("Request body must be file content", 400);
     }
 
     // If this is not the first chunk and we have a header row, prepend it
     if (parseInt(chunkIndex || "0") > 0 && headerRow) {
-      csvContent = decodeURIComponent(headerRow) + "\n" + csvContent;
+      const contentStr = typeof fileContent === "string" ? fileContent : fileContent.toString("utf8");
+      fileContent = decodeURIComponent(headerRow) + "\n" + contentStr;
     }
 
     const chunkNum = parseInt(chunkIndex || "0") + 1;
     const total = parseInt(totalChunks || "1");
-    console.log(`[import-chunked] Processing chunk ${chunkNum}/${total} for ${fileName} (${csvContent.length} bytes)`);
+    const contentLength = typeof fileContent === "string" ? fileContent.length : fileContent.length;
+    console.log(`[import-chunked] Processing chunk ${chunkNum}/${total} for ${fileName} (${contentLength} bytes, provider: ${provider})`);
 
-    const result = await importLexRatebook({
-      fileName: `${fileName} (chunk ${chunkNum}/${total})`,
-      contractType,
-      csvContent,
-    });
+    let result;
+    if (provider === "ald") {
+      result = await importALDRatebook({
+        fileName: `${fileName} (chunk ${chunkNum}/${total})`,
+        contractType,
+        fileContent,
+      });
+    } else {
+      const csvContent = typeof fileContent === "string" ? fileContent : fileContent.toString("utf8");
+      result = await importLexRatebook({
+        fileName: `${fileName} (chunk ${chunkNum}/${total})`,
+        contractType,
+        csvContent,
+      });
+    }
 
     res.json({
       ...result,
       chunkIndex: parseInt(chunkIndex || "0"),
       totalChunks: total,
     });
+  })
+);
+
+/**
+ * POST /api/admin/ratebooks/import-with-mappings
+ * Import a ratebook using custom column mappings (for any provider)
+ * This endpoint supports dynamic column configuration from the UI
+ */
+router.post(
+  "/import-with-mappings",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { fileName, contractType, fileContent, providerCode, columnMappings } = req.body;
+
+    if (!fileName || !contractType || !fileContent || !providerCode || !columnMappings) {
+      throw new ApiError(
+        "Missing required fields: fileName, contractType, fileContent, providerCode, columnMappings",
+        400
+      );
+    }
+
+    // Validate columnMappings has required fields
+    const requiredFields = ["capCode", "manufacturer", "model", "term", "annualMileage", "totalRental"];
+    const mappedFields = Object.values(columnMappings).filter(Boolean);
+    const missingRequired = requiredFields.filter((f) => !mappedFields.includes(f));
+
+    if (missingRequired.length > 0) {
+      throw new ApiError(
+        `Missing required field mappings: ${missingRequired.join(", ")}. Please map columns for these fields.`,
+        400
+      );
+    }
+
+    console.log(
+      `[import-with-mappings] Importing ${fileName} for provider ${providerCode} with ${Object.keys(columnMappings).length} column mappings`
+    );
+
+    const result = await importGenericRatebook({
+      fileName,
+      contractType,
+      fileContent,
+      providerCode,
+      columnMappings,
+    });
+
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    res.json(result);
   })
 );
 

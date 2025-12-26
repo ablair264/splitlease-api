@@ -4,12 +4,14 @@ import dashboardRouter from "./dashboard.js";
 import dealsRouter from "./deals.js";
 import ratebooksRouter from "./ratebooks.js";
 import ratesRouter from "./rates.js";
+import providersRouter from "./providers.js";
 
 const router = Router();
 
-// Ratebooks routes - no auth for now (internal tool)
+// Ratebooks and providers routes - no auth for now (internal tool)
 // TODO: Add proper auth when ready
 router.use("/ratebooks", ratebooksRouter);
+router.use("/providers", providersRouter);
 
 // All other admin routes require authentication
 router.use(requireAuth);
