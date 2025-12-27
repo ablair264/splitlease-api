@@ -5,6 +5,7 @@ export interface ExtractHeadersResult {
   headers: string[];
   sampleRows: Record<string, string>[];
   headerRowIndex: number;
+  isMatrix: boolean;
 }
 
 const HEADER_KEYWORDS = [
@@ -65,6 +66,7 @@ export function extractHeadersFromXlsx(buffer: Buffer, fileName: string): Extrac
       headers: matrix.headers,
       sampleRows: matrix.sampleRows,
       headerRowIndex: matrixDetection.termRowIndex ?? 0,
+      isMatrix: true,
     };
   }
 
@@ -73,7 +75,7 @@ export function extractHeadersFromXlsx(buffer: Buffer, fileName: string): Extrac
   const rawData = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "" });
 
   if (rawData.length === 0) {
-    return { headers: [], sampleRows: [], headerRowIndex: 0 };
+    return { headers: [], sampleRows: [], headerRowIndex: 0, isMatrix: false };
   }
 
   const headerRowIndex = findHeaderRowIndex(rawData);
@@ -118,5 +120,5 @@ export function extractHeadersFromXlsx(buffer: Buffer, fileName: string): Extrac
     return strRow;
   });
 
-  return { headers, sampleRows, headerRowIndex };
+  return { headers, sampleRows, headerRowIndex, isMatrix: false };
 }

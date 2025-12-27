@@ -60,6 +60,10 @@ router.post(
         headers = extractResult.headers;
         sampleRows = extractResult.sampleRows;
 
+        if (extractResult.isMatrix) {
+          console.log(`[extract-headers] Matrix detected for ${fileName}`);
+        }
+
         console.log(
           `[extract-headers] XLSX: Using row ${extractResult.headerRowIndex} as header for ${fileName}`
         );
