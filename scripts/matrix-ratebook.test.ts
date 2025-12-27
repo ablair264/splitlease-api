@@ -39,5 +39,7 @@ assert.ok(parsed.headers.includes("1+23"));
 assert.ok(parsed.headers.includes("1+35"));
 assert.ok(parsed.headers.includes("Mileage"));
 assert.equal(parsed.sampleRows[0]?.Mileage, "5k - Non Maintained");
+assert.equal(parsed.meta.capId, "108321");
+assert.equal(parsed.meta.otr, "25000");
 
 console.log("matrix-ratebook.test.ts passed");
