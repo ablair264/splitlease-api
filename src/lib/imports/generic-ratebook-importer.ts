@@ -36,6 +36,7 @@ export type IndexBasedColumnMappings = {
   monthly_rental?: number;
   p11d?: number;
   otr_price?: number;
+  basic_list_price?: number;
   term?: number;
   mileage?: number;
   mpg?: number;
@@ -321,6 +322,8 @@ export async function importGenericRatebook(options: GenericImportOptions): Prom
         const modelYear = extractValue(row, "modelYear", columnMappings);
         const excessMileagePpm = toPence(extractValue(row, "excessMileagePpm", columnMappings));
         const wholeLifeCost = toPence(extractValue(row, "wholeLifeCost", columnMappings));
+        const otrPrice = toPence(extractValue(row, "otrPrice", columnMappings));
+        const basicListPrice = toPence(extractValue(row, "basicListPrice", columnMappings));
         const insuranceGroup = extractValue(row, "insuranceGroup", columnMappings);
         const mpgCombined = extractValue(row, "mpgCombined", columnMappings);
         const wltpEvRange = parseInt2(extractValue(row, "wltpEvRange", columnMappings));
@@ -344,6 +347,8 @@ export async function importGenericRatebook(options: GenericImportOptions): Prom
           nonRecoverableVat: null,
           co2Gkm,
           p11d,
+          otrPrice,
+          basicListPrice,
           fuelType: fuelType ? String(fuelType) : null,
           transmission: transmission ? String(transmission) : null,
           bodyStyle: bodyStyle ? String(bodyStyle) : null,

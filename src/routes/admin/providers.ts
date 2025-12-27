@@ -134,14 +134,42 @@ router.post(
 
         if (allData.length > 0) {
           headers = Object.keys(allData[0] || {});
-          // Convert values to strings for sample rows
-          sampleRows = allData.slice(0, 5).map((row) => {
+
+          // Helper function to check if a row looks like actual data vs metadata/count row
+          const isValidDataRow = (row: Record<string, string | number>): boolean => {
+            const values = Object.values(row);
+            const filledValues = values.filter(v => v !== null && v !== undefined && v !== "");
+
+            // If less than 3 values filled, it's likely a count/metadata row
+            if (filledValues.length < 3) return false;
+
+            // Check if first value looks like a date serial (Excel dates are numbers between 1 and 100000)
+            const firstVal = values[0];
+            if (typeof firstVal === "number" && firstVal > 30000 && firstVal < 100000) {
+              // Could be an Excel date, check if other values look like data
+              const stringValues = values.filter(v => typeof v === "string" && v.length > 2);
+              if (stringValues.length < 2) return false;
+            }
+
+            // Check if it has typical vehicle data patterns (manufacturer/model strings)
+            const hasTextContent = values.some(v =>
+              typeof v === "string" && v.length > 2 && !/^\d+$/.test(v)
+            );
+
+            return hasTextContent;
+          };
+
+          // Filter to valid data rows and convert to strings
+          const validRows = allData.filter(isValidDataRow);
+          sampleRows = validRows.slice(0, 5).map((row) => {
             const strRow: Record<string, string> = {};
             for (const [key, value] of Object.entries(row)) {
               strRow[key] = String(value ?? "");
             }
             return strRow;
           });
+
+          console.log(`[extract-headers] XLSX: Filtered ${allData.length} rows to ${validRows.length} valid data rows`);
         }
 
         console.log(`[extract-headers] XLSX: Found ${headers.length} headers: ${headers.slice(0, 5).join(", ")}...`);

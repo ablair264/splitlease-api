@@ -396,6 +396,7 @@ export type ColumnMappings = {
   monthly_rental?: number;
   p11d?: number;
   otr_price?: number;
+  basic_list_price?: number;
   term?: number;
   mileage?: number;
   mpg?: number;
@@ -706,6 +707,7 @@ export const providerRates = pgTable("provider_rates", {
   // Vehicle specs
   co2Gkm: integer("co2_gkm"),
   p11d: integer("p11d"), // in pence
+  otrPrice: integer("otr_price"), // On The Road price in pence
   fuelType: text("fuel_type"),
   transmission: text("transmission"),
   bodyStyle: text("body_style"),
@@ -899,6 +901,7 @@ export type ProviderRate = {
   nonRecoverableVat: number | null;
   co2Gkm: number | null;
   p11d: number | null;
+  otrPrice: number | null;
   fuelType: string | null;
   transmission: string | null;
   bodyStyle: string | null;

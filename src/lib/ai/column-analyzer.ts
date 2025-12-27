@@ -34,6 +34,8 @@ export const DATABASE_FIELDS = {
   // Additional pricing
   excessMileagePpm: { label: "Excess Mileage PPM", description: "Excess mileage charge per mile in pence", required: false },
   wholeLifeCost: { label: "Whole Life Cost", description: "Total cost over contract period", required: false },
+  otrPrice: { label: "OTR Price", description: "On The Road price (full vehicle price including taxes)", required: false },
+  basicListPrice: { label: "Basic List Price", description: "Basic list price before options/taxes", required: false },
 
   // Other specs
   insuranceGroup: { label: "Insurance Group", description: "Insurance group number", required: false },
@@ -108,6 +110,8 @@ Common column name patterns:
 - CO2, CO2 g/km, CO2_g_per_km -> co2Gkm
 - FUEL TYPE, Fuel -> fuelType
 - TRANSMISSION, Trans -> transmission
+- OTR, OTRP, On The Road, OTR Price -> otrPrice
+- BASIC PRICE, Basic List Price, List Price, Base Price -> basicListPrice
 
 Respond in JSON format:
 {
@@ -204,6 +208,8 @@ function fallbackAnalysis(headers: string[]): AnalysisResult {
     bodyStyle: [/body.?style/i, /^body$/i],
     excessMileagePpm: [/excess.?mileage/i, /emc/i],
     wholeLifeCost: [/whole.?life/i, /wlc/i],
+    otrPrice: [/^otr$/i, /^otrp$/i, /on.?the.?road/i, /otr.?price/i],
+    basicListPrice: [/basic.?price/i, /basic.?list/i, /list.?price/i, /base.?price/i],
     insuranceGroup: [/insurance.?group/i],
     mpgCombined: [/mpg/i, /fuel.?eco/i],
     wltpEvRange: [/ev.?range/i, /electric.?range/i, /wltp/i],
