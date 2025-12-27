@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { detectMatrixRatebook, parseMatrixToFlat } from "./matrix-ratebook";
 
 export interface ExtractHeadersResult {
   headers: string[];
@@ -56,7 +57,17 @@ function findHeaderRowIndex(rawData: unknown[][]): number {
   return headerRowIndex;
 }
 
-export function extractHeadersFromXlsx(buffer: Buffer, _fileName: string): ExtractHeadersResult {
+export function extractHeadersFromXlsx(buffer: Buffer, fileName: string): ExtractHeadersResult {
+  const matrixDetection = detectMatrixRatebook({ buffer, fileName });
+  if (matrixDetection.isMatrix) {
+    const matrix = parseMatrixToFlat({ buffer, fileName });
+    return {
+      headers: matrix.headers,
+      sampleRows: matrix.sampleRows,
+      headerRowIndex: matrixDetection.termRowIndex ?? 0,
+    };
+  }
+
   const wb = XLSX.read(buffer, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rawData = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "" });
