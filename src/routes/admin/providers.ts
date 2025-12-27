@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { asyncHandler, ApiError } from "../../middleware/error.js";
 import { analyzeColumnHeaders, getDatabaseFields, DatabaseFieldKey } from "../../lib/ai/column-analyzer.js";
 import { parse } from "csv-parse/sync";
-import * as XLSX from "xlsx";
+import { extractHeadersFromXlsx } from "../../lib/imports/extract-headers.js";
 
 const router = Router();
 
@@ -53,125 +53,16 @@ router.post(
 
     try {
       if (isXLSX) {
-        // Parse XLSX
         const buffer = isBase64
           ? Buffer.from(fileContent, "base64")
           : Buffer.from(fileContent);
-        const wb = XLSX.read(buffer, { type: "buffer" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
+        const extractResult = extractHeadersFromXlsx(buffer, fileName);
+        headers = extractResult.headers;
+        sampleRows = extractResult.sampleRows;
 
-        // Detect how many title rows to skip by checking first few rows
-        // ALD files have "Broker - CHcmXX" in row 0 and a count row in row 1
-        const rawData = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 });
-
-        // STEP 1: Find the row with the most columns - this is almost always the header row
-        let maxColumns = 0;
-        let headerRowIndex = 0;
-        for (let i = 0; i < Math.min(15, rawData.length); i++) {
-          const row = rawData[i];
-          const filledCells = row ? row.filter(Boolean).length : 0;
-          if (filledCells > maxColumns) {
-            maxColumns = filledCells;
-            headerRowIndex = i;
-          }
-        }
-
-        console.log(`[extract-headers] Max columns row: index ${headerRowIndex} with ${maxColumns} columns`);
-
-        // STEP 2: Verify the max-columns row looks like headers (has text, not just numbers)
-        // If it has at least 5 columns, use it as the header row
-        let skipRows = headerRowIndex;
-
-        // STEP 3: Double-check by looking for keyword matches (optional validation)
-        if (maxColumns >= 5) {
-          const headerRow = rawData[headerRowIndex];
-          const rowStr = headerRow ? headerRow.join(" ").toUpperCase() : "";
-
-          // Check for common header keywords to confirm
-          const hasHeaderKeywords =
-            rowStr.includes("MANUFACTURER") ||
-            rowStr.includes("CAP CODE") ||
-            rowStr.includes("CAP_CODE") ||
-            rowStr.includes("CAPCODE") ||
-            rowStr.includes("MILEAGE") ||
-            rowStr.includes("RENTAL") ||
-            rowStr.includes("MODEL") ||
-            rowStr.includes("MAKE") ||
-            rowStr.includes("VARIANT") ||
-            rowStr.includes("DERIVATIVE");
-
-          if (hasHeaderKeywords) {
-            console.log(`[extract-headers] Confirmed header row ${headerRowIndex} with keywords`);
-          } else {
-            console.log(`[extract-headers] Using row ${headerRowIndex} based on column count (${maxColumns}), no keyword match`);
-          }
-        } else {
-          // Very few columns - might be a malformed file, try to find any row with headers
-          console.log(`[extract-headers] Warning: Max columns is only ${maxColumns}, searching for header keywords...`);
-
-          for (let i = 0; i < Math.min(10, rawData.length); i++) {
-            const row = rawData[i];
-            if (!row) continue;
-
-            const rowStr = row.join(" ").toUpperCase();
-            if (
-              rowStr.includes("MANUFACTURER") ||
-              rowStr.includes("CAP CODE") ||
-              rowStr.includes("RENTAL") ||
-              rowStr.includes("MODEL")
-            ) {
-              skipRows = i;
-              console.log(`[extract-headers] Found header keywords at row ${i}`);
-              break;
-            }
-          }
-        }
-
-        console.log(`[extract-headers] XLSX: Using row ${skipRows} as header for ${fileName}`);
-
-        // Get all data starting from header row
-        const allData = XLSX.utils.sheet_to_json<Record<string, string | number>>(ws, { range: skipRows });
-
-        if (allData.length > 0) {
-          headers = Object.keys(allData[0] || {});
-
-          // Helper function to check if a row looks like actual data vs metadata/count row
-          const isValidDataRow = (row: Record<string, string | number>): boolean => {
-            const values = Object.values(row);
-            const filledValues = values.filter(v => v !== null && v !== undefined && v !== "");
-
-            // If less than 3 values filled, it's likely a count/metadata row
-            if (filledValues.length < 3) return false;
-
-            // Check if first value looks like a date serial (Excel dates are numbers between 1 and 100000)
-            const firstVal = values[0];
-            if (typeof firstVal === "number" && firstVal > 30000 && firstVal < 100000) {
-              // Could be an Excel date, check if other values look like data
-              const stringValues = values.filter(v => typeof v === "string" && v.length > 2);
-              if (stringValues.length < 2) return false;
-            }
-
-            // Check if it has typical vehicle data patterns (manufacturer/model strings)
-            const hasTextContent = values.some(v =>
-              typeof v === "string" && v.length > 2 && !/^\d+$/.test(v)
-            );
-
-            return hasTextContent;
-          };
-
-          // Filter to valid data rows and convert to strings
-          const validRows = allData.filter(isValidDataRow);
-          sampleRows = validRows.slice(0, 5).map((row) => {
-            const strRow: Record<string, string> = {};
-            for (const [key, value] of Object.entries(row)) {
-              strRow[key] = String(value ?? "");
-            }
-            return strRow;
-          });
-
-          console.log(`[extract-headers] XLSX: Filtered ${allData.length} rows to ${validRows.length} valid data rows`);
-        }
-
+        console.log(
+          `[extract-headers] XLSX: Using row ${extractResult.headerRowIndex} as header for ${fileName}`
+        );
         console.log(`[extract-headers] XLSX: Found ${headers.length} headers: ${headers.slice(0, 5).join(", ")}...`);
       } else {
         // Parse CSV
